@@ -931,6 +931,51 @@ namespace QuantConnect.Tests.Common.Securities
             algorithm.Portfolio.InvalidateTotalPortfolioValue();
         }
 
+        [Test]
+        public void MarginRequirementsAreThreadSafe()
+        {
+            var tz = TimeZones.NewYork;
+            var time = new DateTime(2030, 1, 1);
+            var symbol = Symbol.CreateFuture(QuantConnect.Securities.Futures.Indices.SP500EMini, Market.CME, new DateTime(2030, 3, 1));
+            const int threads = 8;
+
+            for (var iteration = 0; iteration < 200; iteration++)
+            {
+                var futureSecurity = new Future(
+                    SecurityExchangeHours.AlwaysOpen(tz),
+                    new SubscriptionDataConfig(typeof(TradeBar), symbol, Resolution.Minute, tz, tz, true, false, false),
+                    new Cash(Currencies.USD, 0, 1m),
+                    new OptionSymbolProperties(SymbolProperties.GetDefault(Currencies.USD)),
+                    ErrorCurrencyConverter.Instance,
+                    RegisteredSecurityDataTypesProvider.Null
+                );
+                futureSecurity.SetMarketPrice(new Tick { Value = 1000m, Time = time });
+                var model = new FutureMarginModel(security: futureSecurity);
+                futureSecurity.BuyingPowerModel = model;
+
+                var errors = new System.Collections.Concurrent.ConcurrentBag<Exception>();
+                using var barrier = new System.Threading.Barrier(threads);
+                var tasks = Enumerable.Range(0, threads).Select(_ => System.Threading.Tasks.Task.Factory.StartNew(() =>
+                {
+                    barrier.SignalAndWait();
+                    try
+                    {
+                        // the first call walks the history table, all of them must succeed
+                        Assert.Greater(model.MaintenanceOvernightMarginRequirement, 0m);
+                    }
+                    catch (Exception exception)
+                    {
+                        errors.Add(exception);
+                    }
+                }, System.Threading.Tasks.TaskCreationOptions.LongRunning)).ToArray();
+                System.Threading.Tasks.Task.WaitAll(tasks);
+
+                Assert.IsEmpty(errors, string.Join(Environment.NewLine, errors.Select(e => e.Message)));
+                // the index must also remain valid for later calls
+                Assert.Greater(model.InitialOvernightMarginRequirement, 0m);
+            }
+        }
+
         private static SubmitOrderRequest GetOrderRequest(Symbol symbol, decimal quantity)
         {
             return new SubmitOrderRequest(OrderType.Market,
