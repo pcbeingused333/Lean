@@ -42,6 +42,54 @@ namespace QuantConnect.Tests.Common.Statistics
             _securityManager = new SecurityManager(new TimeKeeper(_startTime));
         }
 
+        [Test]
+        public void SmallAccountCurrencyProfitRetainsPrecision(
+            [Values] FillGroupingMethod groupingMethod,
+            [Values] FillMatchingMethod matchingMethod,
+            [Values(-1, 1)] int direction,
+            [Values(false, true)] bool partialClose)
+        {
+            const decimal conversionRate = 0.000025m;
+            var builder = new TradeBuilder(groupingMethod, matchingMethod);
+            builder.SetSecurityManager(_securityManager);
+            builder.ProcessFill(new OrderEvent(1, Symbols.SPY, _startTime, OrderStatus.Filled,
+                direction > 0 ? OrderDirection.Buy : OrderDirection.Sell,
+                100m, direction * (partialClose ? 2m : 1m), OrderFee.Zero), conversionRate, 0m);
+            builder.SetMarketPrice(Symbols.SPY, 95m);
+            builder.SetMarketPrice(Symbols.SPY, 120m);
+            builder.ProcessFill(new OrderEvent(2, Symbols.SPY, _startTime.AddHours(1), OrderStatus.Filled,
+                direction > 0 ? OrderDirection.Sell : OrderDirection.Buy,
+                110m, -direction, OrderFee.Zero), conversionRate, 0m);
+            if (partialClose)
+            {
+                builder.ProcessFill(new OrderEvent(3, Symbols.SPY, _startTime.AddHours(2), OrderStatus.Filled,
+                    direction > 0 ? OrderDirection.Sell : OrderDirection.Buy,
+                    110m, -direction, OrderFee.Zero), conversionRate, 0m);
+            }
+
+            Assert.IsFalse(builder.HasOpenPosition(Symbols.SPY));
+            Assert.AreEqual(partialClose && groupingMethod != FillGroupingMethod.FlatToFlat ? 2 : 1,
+                builder.ClosedTrades.Count);
+            foreach (var trade in builder.ClosedTrades)
+            {
+                Assert.AreEqual(direction * 0.00025m * trade.Quantity, trade.ProfitLoss);
+                Assert.AreEqual(direction > 0, trade.IsWin);
+                Assert.AreEqual(0m, trade.TotalFees);
+                if (groupingMethod == FillGroupingMethod.FillToFill)
+                {
+                    Assert.AreEqual(direction > 0 ? -0.000125m : -0.0005m, trade.MAE);
+                    Assert.AreEqual(direction > 0 ? 0.0005m : 0.000125m, trade.MFE);
+                    Assert.AreEqual(direction > 0 ? 0.00025m : 0.000625m, trade.EndTradeDrawdown);
+                }
+                else
+                {
+                    Assert.AreEqual(0m, trade.MAE);
+                    Assert.AreEqual(0m, trade.MFE);
+                    Assert.AreEqual(0m, trade.EndTradeDrawdown);
+                }
+            }
+        }
+
         [TestCaseSource(nameof(CryptoFutureTradeCases))]
         public void CryptoFutureTradeProfitLoss(string ticker, string market, decimal quantity, decimal expectedProfit,
             FillGroupingMethod groupingMethod, int direction)
@@ -60,7 +108,7 @@ namespace QuantConnect.Tests.Common.Statistics
 
             var trade = builder.ClosedTrades[0];
             Assert.AreEqual(1, builder.ClosedTrades.Count);
-            Assert.AreEqual(direction * expectedProfit, trade.ProfitLoss);
+            Assert.AreEqual(direction * expectedProfit, trade.ProfitLoss, 0.00000001m);
             Assert.AreEqual(40000m, trade.EntryPrice);
             Assert.AreEqual(44000m, trade.ExitPrice);
             Assert.AreEqual(quantity, trade.Quantity);
@@ -91,10 +139,10 @@ namespace QuantConnect.Tests.Common.Statistics
                 rate, 0m, 100m);
 
             var trade = builder.ClosedTrades[0];
-            Assert.AreEqual(direction * 1000m * rate, trade.ProfitLoss);
-            Assert.AreEqual(Math.Round(adverse * rate, 2), trade.MAE);
-            Assert.AreEqual(Math.Round(favorable * rate, 2), trade.MFE);
-            Assert.AreEqual(Math.Round(drawdown * rate, 2), trade.EndTradeDrawdown);
+            Assert.AreEqual(direction * 1000m * rate, trade.ProfitLoss, 0.00000001m);
+            Assert.AreEqual(adverse * rate, trade.MAE, 0.005m);
+            Assert.AreEqual(favorable * rate, trade.MFE, 0.005m);
+            Assert.AreEqual(drawdown * rate, trade.EndTradeDrawdown, 0.005m);
         }
 
         [Test]
@@ -108,7 +156,7 @@ namespace QuantConnect.Tests.Common.Statistics
                 1m, 0m, 100m);
 
             var trade = builder.ClosedTrades[0];
-            Assert.AreEqual(1000m, trade.ProfitLoss);
+            Assert.AreEqual(1000m, trade.ProfitLoss, 0.00000001m);
             Assert.AreEqual(0m, trade.MAE);
             Assert.AreEqual(0m, trade.EndTradeDrawdown);
         }
@@ -132,7 +180,7 @@ namespace QuantConnect.Tests.Common.Statistics
             {
                 totalProfit += trade.ProfitLoss;
             }
-            Assert.AreEqual(direction * 633.33m, totalProfit);
+            Assert.AreEqual(direction * 633.33m, totalProfit, 0.005m);
             Assert.IsFalse(builder.HasOpenPosition(security.Symbol));
             if (groupingMethod == FillGroupingMethod.FlatToFlat)
             {
