@@ -108,7 +108,7 @@ namespace QuantConnect.Tests.Common.Statistics
 
             var trade = builder.ClosedTrades[0];
             Assert.AreEqual(1, builder.ClosedTrades.Count);
-            Assert.AreEqual(direction * expectedProfit, trade.ProfitLoss, 0.00000001m);
+            Assert.AreEqual(direction * expectedProfit, trade.ProfitLoss);
             Assert.AreEqual(40000m, trade.EntryPrice);
             Assert.AreEqual(44000m, trade.ExitPrice);
             Assert.AreEqual(quantity, trade.Quantity);
@@ -123,9 +123,9 @@ namespace QuantConnect.Tests.Common.Statistics
         {
             var builder = CreateCryptoFutureTradeBuilder("BTCUSD", FillGroupingMethod.FillToFill, FillMatchingMethod.FIFO,
                 out var security, accountCurrency: accountRate == 1.0 ? Currencies.USD : "EUR");
-            var adverse = direction > 0 ? -1222.22m : -2200m;
-            var favorable = direction > 0 ? 2200m : 1222.22m;
-            var drawdown = direction > 0 ? 3422.22m : 2222.22m;
+            var adverse = direction > 0 ? -1m / 36000m + 1m / 40000m : -1m / 40000m + 1m / 50000m;
+            var favorable = direction > 0 ? -1m / 50000m + 1m / 40000m : -1m / 40000m + 1m / 36000m;
+            var drawdown = direction > 0 ? favorable - adverse : favorable;
             var rate = (decimal)accountRate;
             security.BaseCurrency.ConversionRate = 44000m * rate;
             security.QuoteCurrency.ConversionRate = rate;
@@ -139,10 +139,10 @@ namespace QuantConnect.Tests.Common.Statistics
                 rate, 0m, 100m);
 
             var trade = builder.ClosedTrades[0];
-            Assert.AreEqual(direction * 1000m * rate, trade.ProfitLoss, 0.00000001m);
-            Assert.AreEqual(adverse * rate, trade.MAE, 0.005m);
-            Assert.AreEqual(favorable * rate, trade.MFE, 0.005m);
-            Assert.AreEqual(drawdown * rate, trade.EndTradeDrawdown, 0.005m);
+            Assert.AreEqual(direction * 1000m * rate, trade.ProfitLoss);
+            Assert.AreEqual(adverse * 100m * (44000m * rate) * 100m, trade.MAE);
+            Assert.AreEqual(favorable * 100m * (44000m * rate) * 100m, trade.MFE);
+            Assert.AreEqual(drawdown * 100m * (44000m * rate) * 100m, trade.EndTradeDrawdown);
         }
 
         [Test]
@@ -156,7 +156,7 @@ namespace QuantConnect.Tests.Common.Statistics
                 1m, 0m, 100m);
 
             var trade = builder.ClosedTrades[0];
-            Assert.AreEqual(1000m, trade.ProfitLoss, 0.00000001m);
+            Assert.AreEqual(1000m, trade.ProfitLoss);
             Assert.AreEqual(0m, trade.MAE);
             Assert.AreEqual(0m, trade.EndTradeDrawdown);
         }
@@ -180,7 +180,7 @@ namespace QuantConnect.Tests.Common.Statistics
             {
                 totalProfit += trade.ProfitLoss;
             }
-            Assert.AreEqual(direction * 633.33m, totalProfit, 0.005m);
+            Assert.AreEqual(direction * 633.33m, Math.Round(totalProfit, 2));
             Assert.IsFalse(builder.HasOpenPosition(security.Symbol));
             if (groupingMethod == FillGroupingMethod.FlatToFlat)
             {
