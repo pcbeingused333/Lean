@@ -54,14 +54,63 @@ namespace QuantConnect.Tests.Report
         [TestCase(1, 1)]
         public void ConvertsToPdfDestinationContainingSpaces(int converterExitCode, int expectedExitCode)
         {
+            var argumentsFile = CreateConverter(converterExitCode);
+            var reportDirectory = Directory.CreateDirectory(Path.Combine(_directory, "my reports")).FullName;
+            var destination = Path.Combine(reportDirectory, "report.html");
+
+            RunReport(destination);
+
+            Assert.IsTrue(File.Exists(destination));
+            CollectionAssert.AreEqual(
+                new[] { "--server-args=-screen 0, 1600x1200x24+32", "wkhtmltopdf", destination, Path.Combine(reportDirectory, "report.pdf") },
+                File.ReadAllLines(argumentsFile));
+            Assert.AreEqual(expectedExitCode, Environment.ExitCode);
+        }
+
+        [TestCase("report.html", "report.pdf")]
+        [TestCase("report.HTML", "report.pdf")]
+        [TestCase("report", "report.pdf")]
+        public void ConvertsToPdfDestinationWithAnyExtension(string fileName, string expectedPdfName)
+        {
+            var argumentsFile = CreateConverter(0);
+            var reportDirectory = Directory.CreateDirectory(Path.Combine(_directory, "my reports")).FullName;
+            var destination = Path.Combine(reportDirectory, fileName);
+
+            RunReport(destination);
+
+            Assert.IsTrue(File.Exists(destination));
+            CollectionAssert.AreEqual(
+                new[] { "--server-args=-screen 0, 1600x1200x24+32", "wkhtmltopdf", destination, Path.Combine(reportDirectory, expectedPdfName) },
+                File.ReadAllLines(argumentsFile));
+            Assert.AreEqual(0, Environment.ExitCode);
+        }
+
+        [TestCase("report.pdf")]
+        [TestCase("report.PDF")]
+        public void RejectsPdfDestinationBeforeWritingHtml(string fileName)
+        {
+            var argumentsFile = CreateConverter(0);
+            var destination = Path.Combine(_directory, fileName);
+
+            RunReport(destination);
+
+            Assert.IsFalse(File.Exists(destination));
+            Assert.IsFalse(File.Exists(argumentsFile));
+            Assert.AreEqual(1, Environment.ExitCode);
+        }
+
+        private string CreateConverter(int converterExitCode)
+        {
             var argumentsFile = Path.Combine(_directory, "arguments.txt");
             var converter = Path.Combine(_directory, "xvfb-run");
             File.WriteAllText(converter, $"#!/bin/sh\nprintf '%s\\n' \"$@\" > '{argumentsFile}'\nexit {converterExitCode}\n");
             File.SetUnixFileMode(converter, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
             Environment.SetEnvironmentVariable("PATH", $"{_directory}{Path.PathSeparator}{_path}");
+            return argumentsFile;
+        }
 
-            var reportDirectory = Directory.CreateDirectory(Path.Combine(_directory, "my reports")).FullName;
-            var destination = Path.Combine(reportDirectory, "report.html");
+        private static void RunReport(string destination)
+        {
             Config.Set("backtest-data-source-file", Path.Combine("TestData", "test_report_data.json"));
             Config.Set("live-data-source-file", "");
             Config.Set("report-destination", destination);
@@ -71,12 +120,6 @@ namespace QuantConnect.Tests.Report
             var main = Type.GetType("QuantConnect.Report.Program, QuantConnect.Report", throwOnError: true)
                 .GetMethod("Main", BindingFlags.Static | BindingFlags.NonPublic);
             main.Invoke(null, new object[] { Array.Empty<string>() });
-
-            Assert.IsTrue(File.Exists(destination));
-            CollectionAssert.AreEqual(
-                new[] { "--server-args=-screen 0, 1600x1200x24+32", "wkhtmltopdf", destination, Path.Combine(reportDirectory, "report.pdf") },
-                File.ReadAllLines(argumentsFile));
-            Assert.AreEqual(expectedExitCode, Environment.ExitCode);
         }
     }
 }

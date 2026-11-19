@@ -126,16 +126,26 @@ namespace QuantConnect.Report
             //Write it to target destination.
             if (!string.IsNullOrEmpty(destination))
             {
+                var convertToPdf = !string.IsNullOrEmpty(reportFormat) && reportFormat.ToUpperInvariant() == "PDF";
+                var pdfDestination = convertToPdf ? Path.ChangeExtension(destination, ".pdf") : null;
+                if (convertToPdf && string.Equals(pdfDestination, destination, StringComparison.OrdinalIgnoreCase))
+                {
+                    // the converter would read and write the same file, so the PDF would never be created
+                    Log.Error($"QuantConnect.Report.Main(): The report destination {destination} already has a .pdf extension. " +
+                        "Use a different extension, such as .html, for the report destination when the report format is PDF.");
+                    Environment.ExitCode = 1;
+                    return;
+                }
+
                 Log.Trace($"QuantConnect.Report.Main(): Writing content to file {destination}");
                 File.WriteAllText(destination, html);
 
-                if (!String.IsNullOrEmpty(reportFormat) && reportFormat.ToUpperInvariant() == "PDF")
+                if (convertToPdf)
                 {
                     try
                     {
                         Log.Trace("QuantConnect.Report.Main(): Starting conversion to PDF");
                         // Ensure wkhtmltopdf and xvfb are installed and accessible from the $PATH
-                        var pdfDestination = destination.Replace(".html", ".pdf");
                         Process process = new();
                         process.StartInfo.FileName = "xvfb-run";
                         process.StartInfo.ArgumentList.Add("--server-args=-screen 0, 1600x1200x24+32");
